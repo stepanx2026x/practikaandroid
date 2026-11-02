@@ -1,8 +1,5 @@
 package com.practika.hospitalclicker
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
-import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.app.Activity
 import android.app.AlertDialog
@@ -14,7 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -34,7 +30,8 @@ class MainActivity : Activity() {
     private lateinit var rankText: TextView
     private lateinit var nextRankText: TextView
     private lateinit var rankProgress: ProgressBar
-    private lateinit var patientButton: TextView
+    private lateinit var hospitalView: HospitalView
+    private lateinit var newsText: TextView
     private lateinit var patientsText: TextView
     private lateinit var emergencyButton: TextView
     private lateinit var clickArea: FrameLayout
@@ -59,8 +56,8 @@ class MainActivity : Activity() {
     private var emergencyHideAt = 0L
     private var ticksSinceSave = 0
 
-    private val sickFaces = listOf("🤒", "🤕", "🤧", "🤢", "😷", "🥴")
-    private val healedFaces = listOf("😊", "😁", "🥳", "😎", "🙂")
+    private var orbitersKey = ""
+    private var newsCountdown = 0
 
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -68,6 +65,10 @@ class MainActivity : Activity() {
             game.tick((now - lastTick) / 1000.0)
             lastTick = now
             updateEmergency(now)
+            if (--newsCountdown <= 0) {
+                newsCountdown = NEWS_TICKS
+                newsText.text = News.next(game)
+            }
             refreshUi()
             if (++ticksSinceSave >= 50) { // ~ каждые 5 секунд
                 ticksSinceSave = 0
@@ -86,7 +87,9 @@ class MainActivity : Activity() {
         rankText = findViewById(R.id.rankText)
         nextRankText = findViewById(R.id.nextRankText)
         rankProgress = findViewById(R.id.rankProgress)
-        patientButton = findViewById(R.id.patientButton)
+        hospitalView = findViewById(R.id.hospitalView)
+        newsText = findViewById(R.id.newsText)
+        newsText.isSelected = true // включает бегущую строку
         patientsText = findViewById(R.id.patientsText)
         emergencyButton = findViewById(R.id.emergencyButton)
         clickArea = findViewById(R.id.clickArea)
@@ -102,16 +105,19 @@ class MainActivity : Activity() {
             findViewById(R.id.tabTools),
             findViewById(R.id.tabPrestige),
             findViewById(R.id.tabMaps),
+            findViewById(R.id.tabAchievements),
+            findViewById(R.id.tabStats),
         )
 
-        game.onMessage = { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
-
         load()
+        // Достижения, выполненные до обновления, засчитываем молча
+        game.checkAchievements()
+        game.onMessage = { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
         lastRankIndex = game.rankIndex
 
         buildShop()
         setupTabs()
-        setupPatientButton()
+        hospitalView.onHospitalClick = { x, y -> onHospitalClicked(x, y) }
 
         emergencyButton.setOnClickListener { onEmergencyClicked() }
 
@@ -125,75 +131,22 @@ class MainActivity : Activity() {
         lastTick = SystemClock.elapsedRealtime()
         scheduleNextEmergency()
         handler.post(tickRunnable)
+        hospitalView.running = true
     }
 
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(tickRunnable)
+        hospitalView.running = false
         save()
     }
 
-    // ---------- Клик по пациенту ----------
+    // ---------- Клик по больнице ----------
 
-    private fun setupPatientButton() {
-        patientButton.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    v.animate().scaleX(0.9f).scaleY(0.9f).setDuration(60).start()
-                    onPatientClicked(event.x + v.left, event.y + v.top)
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
-                    if (event.actionMasked == MotionEvent.ACTION_UP) v.performClick()
-                    true
-                }
-                else -> true
-            }
-        }
-    }
-
-    private fun onPatientClicked(x: Float, y: Float) {
+    private fun onHospitalClicked(x: Float, y: Float) {
         val earned = game.click()
-        showFloatingText("+${Game.format(earned)} ₽", x, y, Color.parseColor("#0E9F9A"))
-
-        // Пациент на мгновение выздоравливает, потом приходит следующий
-        patientButton.text = healedFaces.random()
-        handler.removeCallbacks(nextPatientRunnable)
-        handler.postDelayed(nextPatientRunnable, 250)
+        hospitalView.addFloatingText("+${Game.format(earned)} ₽", x, y, Color.parseColor("#0E9F9A"))
         refreshUi()
-    }
-
-    private val nextPatientRunnable = Runnable { patientButton.text = sickFaces.random() }
-
-    private fun showFloatingText(text: String, x: Float, y: Float, color: Int) {
-        val tv = TextView(this).apply {
-            this.text = text
-            setTextColor(color)
-            textSize = 20f
-            setTypeface(typeface, Typeface.BOLD)
-            elevation = 20f
-        }
-        val lp = FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        )
-        clickArea.addView(tv, lp)
-        tv.x = x - 40 + Random.nextInt(-30, 30)
-        tv.y = y - 60
-
-        val up = ObjectAnimator.ofFloat(tv, View.TRANSLATION_Y, tv.y, tv.y - 220f)
-        val fade = ObjectAnimator.ofFloat(tv, View.ALPHA, 1f, 0f)
-        AnimatorSet().apply {
-            playTogether(up, fade)
-            duration = 800
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    clickArea.removeView(tv)
-                }
-            })
-            start()
-        }
     }
 
     // ---------- Экстренный пациент ----------
@@ -220,12 +173,10 @@ class MainActivity : Activity() {
     }
 
     private fun onEmergencyClicked() {
-        val reward = game.emergencyReward()
-        game.earn(reward)
-        game.patientsHealed++
+        val reward = game.rescueEmergency()
         val cx = emergencyButton.x + emergencyButton.width / 2f
         val cy = emergencyButton.y + emergencyButton.height
-        showFloatingText("🚑 +${Game.format(reward)} ₽", cx - 60, cy + 60, Color.parseColor("#E53950"))
+        hospitalView.addFloatingText("🚑 +${Game.format(reward)} ₽", cx, cy + 40, Color.parseColor("#E53950"))
         Toast.makeText(this, "Вы спасли экстренного пациента!", Toast.LENGTH_SHORT).show()
         scheduleNextEmergency()
         refreshUi()
@@ -254,11 +205,17 @@ class MainActivity : Activity() {
         val toolsList = vertical()
         val prestigeList = vertical()
         val mapsList = vertical()
+        val achievementsList = vertical()
+        val statsList = vertical()
+        doctorsList.addView(createBuyAmountSelector())
         game.doctors.forEachIndexed { i, d -> doctorsList.addView(createDoctorCard(i, d)) }
+        toolsList.addView(createBuyAmountSelector())
         game.tools.forEach { toolsList.addView(createToolCard(it)) }
         buildPrestigeTab(prestigeList)
         game.maps.forEach { mapsList.addView(createMapCard(it)) }
-        tabContents = listOf(doctorsList, toolsList, prestigeList, mapsList)
+        buildAchievementsTab(achievementsList)
+        buildStatsTab(statsList)
+        tabContents = listOf(doctorsList, toolsList, prestigeList, mapsList, achievementsList, statsList)
         tabContents.forEach { upgradesContainer.addView(it) }
     }
 
@@ -454,7 +411,7 @@ class MainActivity : Activity() {
         }
 
         hireButton.setOnClickListener {
-            if (game.hire(doctor)) afterPurchase(hireButton) else notEnough(game.hireCost(doctor))
+            if (game.hire(doctor)) afterPurchase(hireButton) else notEnough(game.hireCost(doctor, game.buyAmount))
         }
         qualButton.setOnClickListener {
             when {
@@ -479,8 +436,8 @@ class MainActivity : Activity() {
                 } else {
                     "+${Game.format(game.doctorIncomePerOne(doctor))} ₽/сек за каждого"
                 }
-                val hireCost = game.hireCost(doctor)
-                hireButton.text = "Нанять\n${Game.format(hireCost)} ₽"
+                val hireCost = game.hireCost(doctor, game.buyAmount)
+                hireButton.text = "Нанять ×${game.buyAmount}\n${Game.format(hireCost)} ₽"
                 setButtonState(hireButton, game.money >= hireCost)
 
                 val next = doctor.nextQualificationTitle
@@ -523,12 +480,13 @@ class MainActivity : Activity() {
         root.addView(button)
 
         button.setOnClickListener {
-            if (game.buyTool(tool)) afterPurchase(button) else notEnough(tool.cost)
+            if (game.buyTool(tool)) afterPurchase(button) else notEnough(tool.costFor(game.buyAmount))
         }
         updaters += {
             level.text = "Уровень ${tool.level}"
-            button.text = "Купить\n${Game.format(tool.cost)} ₽"
-            setButtonState(button, game.money >= tool.cost)
+            val cost = tool.costFor(game.buyAmount)
+            button.text = "Купить ×${game.buyAmount}\n${Game.format(cost)} ₽"
+            setButtonState(button, game.money >= cost)
         }
         return root
     }
@@ -732,6 +690,159 @@ class MainActivity : Activity() {
         return root
     }
 
+    // ---------- Покупка ×1 / ×10 / ×100 ----------
+
+    private fun createBuyAmountSelector(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(8), 0, 0)
+        }
+        row.addView(text(13f, R.color.text_muted, bold = true).apply {
+            text = "Покупать по:"
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        val chips = BUY_AMOUNTS.map { amount ->
+            TextView(this).apply {
+                text = "×$amount"
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(dp(14), dp(6), dp(14), dp(6))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginStart = dp(6) }
+                setOnClickListener {
+                    game.buyAmount = amount
+                    refreshUi()
+                }
+                row.addView(this)
+            }
+        }
+        updaters += {
+            chips.forEachIndexed { i, chip ->
+                val selected = BUY_AMOUNTS[i] == game.buyAmount
+                setBg(chip, if (selected) R.drawable.bg_button else R.drawable.bg_chip)
+                chip.setTextColor(if (selected) Color.WHITE else getColor(R.color.text))
+            }
+        }
+        return row
+    }
+
+    // ---------- Достижения ----------
+
+    private fun buildAchievementsTab(list: LinearLayout) {
+        val header = card(vertical = true)
+        val summary = text(15f, R.color.text, bold = true)
+        header.addView(summary)
+        header.addView(text(12f, R.color.text_muted).apply {
+            text = "Каждое достижение навсегда даёт +1% к доходу и клику. Нажмите на значок, чтобы узнать условие."
+        })
+        list.addView(header)
+
+        val grid = card(vertical = true)
+        list.addView(grid)
+        val perRow = 5
+        game.achievements.chunked(perRow).forEach { chunk ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            chunk.forEach { ach ->
+                val tile = TextView(this).apply {
+                    text = ach.emoji
+                    textSize = 26f
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply {
+                        setMargins(dp(3), dp(3), dp(3), dp(3))
+                    }
+                    setOnClickListener {
+                        val got = ach.id in game.unlockedAchievements
+                        Toast.makeText(
+                            this@MainActivity,
+                            "${if (got) "🏆" else "🔒"} ${ach.title}\n${ach.description}",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+                row.addView(tile)
+                updaters += {
+                    val got = ach.id in game.unlockedAchievements
+                    setBg(tile, if (got) R.drawable.bg_chip_ready else R.drawable.bg_chip)
+                    tile.alpha = if (got) 1f else 0.3f
+                }
+            }
+            // Пустые ячейки, чтобы последняя строка не растягивалась
+            repeat(perRow - chunk.size) {
+                row.addView(View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply {
+                        setMargins(dp(3), dp(3), dp(3), dp(3))
+                    }
+                })
+            }
+            grid.addView(row)
+        }
+
+        updaters += {
+            val n = game.unlockedAchievements.size
+            summary.text = "🏆 Получено $n из ${game.achievements.size}  •  бонус +$n%"
+        }
+    }
+
+    // ---------- Статистика ----------
+
+    private fun buildStatsTab(list: LinearLayout) {
+        val c = card(vertical = true)
+        c.addView(text(17f, R.color.text, bold = true).apply {
+            text = "📊 Статистика"
+            setPadding(0, 0, 0, dp(6))
+        })
+        list.addView(c)
+
+        fun row(label: String, value: () -> String) {
+            val r = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(4), 0, dp(4))
+            }
+            r.addView(text(14f, R.color.text_muted).apply {
+                text = label
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            val v = text(14f, R.color.text, bold = true).apply { gravity = Gravity.END }
+            r.addView(v)
+            c.addView(r)
+            updaters += { v.text = value() }
+        }
+
+        row("Деньги") { "${Game.format(game.money)} ₽" }
+        row("Заработано за забег") { "${Game.format(game.totalEarned)} ₽" }
+        row("Заработано за всё время") { "${Game.format(game.lifetimeEarned)} ₽" }
+        row("Доход сейчас") { "${Game.format(game.incomePerSecond)} ₽/сек" }
+        row("Рекорд дохода") { "${Game.format(game.bestIncome)} ₽/сек" }
+        row("Сила клика") { "${Game.format(game.clickPower)} ₽" }
+        row("Кликов сделано") { Game.format(game.totalClicks.toDouble()) }
+        row("Заработано кликами") { "${Game.format(game.clickEarned)} ₽" }
+        row("Вылечено пациентов") { Game.format(game.patientsHealed.toDouble()) }
+        row("Врачей в штате") { Game.format(game.doctors.sumOf { it.count }.toDouble()) }
+        row("Предметов куплено") { "${game.doctors.sumOf { d -> d.items.count { it.owned } }} из ${game.doctors.size * 3}" }
+        row("Экстренных пациентов спасено") { game.emergencies.toString() }
+        row("Вспышек остановлено") { game.outbreaksCured.toString() }
+        row("Вспышек пропущено") { game.outbreaksFailed.toString() }
+        row("Аккредитаций") { game.prestigeCount.toString() }
+        row("Звёзды репутации") { "⭐ ${game.stars}" }
+        row("Достижения") { "${game.unlockedAchievements.size} из ${game.achievements.size}" }
+        row("Карта") { "${game.map.emoji} ${game.map.title}" }
+        row("Время в игре") { formatDuration(game.playTimeSec) }
+        row("Больница открыта") {
+            java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.getDefault())
+                .format(java.util.Date(game.startedAt))
+        }
+    }
+
+    private fun formatDuration(seconds: Double): String {
+        val s = seconds.toLong()
+        val h = s / 3600
+        val m = (s % 3600) / 60
+        return if (h > 0) "$h ч $m мин" else "$m мин ${s % 60} с"
+    }
+
     // ---------- Отрисовка ----------
 
     private fun refreshUi() {
@@ -743,7 +854,6 @@ class MainActivity : Activity() {
         nextRankText.text = game.nextRank?.let {
             "Следующий статус: ${it.title} (${Game.format(it.threshold)} ₽ заработано)"
         } ?: "Максимальный статус достигнут!"
-        patientsText.text = "Вылечено пациентов: ${game.patientsHealed}"
 
         if (game.rankIndex > lastRankIndex) {
             lastRankIndex = game.rankIndex
@@ -751,12 +861,36 @@ class MainActivity : Activity() {
         }
 
         updateEventBanner()
+        updateHospitalView()
         val bg = Color.parseColor(game.map.background)
         if (clickArea.tag != bg) {
             clickArea.setBackgroundColor(bg)
             clickArea.tag = bg
         }
         updaters.forEach { it() }
+    }
+
+    private fun updateHospitalView() {
+        val key = game.doctors.joinToString(",") { it.count.toString() }
+        if (key != orbitersKey) {
+            orbitersKey = key
+            // По кругу берём по одному врачу каждой специальности, пока не наберём лимит
+            val left = game.doctors.map { it.count }.toMutableList()
+            val result = mutableListOf<String>()
+            while (result.size < HospitalView.MAX_ORBITERS && left.any { it > 0 }) {
+                game.doctors.forEachIndexed { i, d ->
+                    if (left[i] > 0 && result.size < HospitalView.MAX_ORBITERS) {
+                        result += d.emoji
+                        left[i]--
+                    }
+                }
+            }
+            hospitalView.orbiters = result
+        }
+        hospitalView.badgeEmoji = game.event?.type?.emoji
+        hospitalView.rainPerSecond = if (game.incomePerSecond <= 0) 0.0
+        else (kotlin.math.log10(1 + game.incomePerSecond) * 0.7).coerceAtMost(8.0)
+        patientsText.text = "Вылечено: ${Game.format(game.patientsHealed.toDouble())}"
     }
 
     private fun updateEventBanner() {
@@ -795,6 +929,18 @@ class MainActivity : Activity() {
         prefs.putInt("prestiges", game.prestigeCount)
         prefs.putString("map", game.mapId)
         game.legacies.forEach { prefs.putBoolean("legacy_${it.id}", it.owned) }
+        prefs.putLong("clicks", game.totalClicks)
+        prefs.putString("clickEarned", game.clickEarned.toString())
+        prefs.putInt("outbreaksCured", game.outbreaksCured)
+        prefs.putInt("outbreaksFailed", game.outbreaksFailed)
+        prefs.putInt("emergencies", game.emergencies)
+        prefs.putString("playTime", game.playTimeSec.toString())
+        prefs.putString("bestIncome", game.bestIncome.toString())
+        prefs.putLong("startedAt", game.startedAt)
+        prefs.putInt("buyAmount", game.buyAmount)
+        prefs.putStringSet("curedEvents", game.curedEventIds.toSet())
+        prefs.putStringSet("visitedMaps", game.visitedMaps.toSet())
+        prefs.putStringSet("achievements", game.unlockedAchievements.toSet())
         prefs.putLong("savedAt", System.currentTimeMillis())
         game.tools.forEach { prefs.putInt("lvl_${it.id}", it.level) }
         game.doctors.forEach { d ->
@@ -815,6 +961,18 @@ class MainActivity : Activity() {
         game.starsSpent = prefs.getLong("starsSpent", 0)
         game.prestigeCount = prefs.getInt("prestiges", 0)
         game.legacies.forEach { it.owned = prefs.getBoolean("legacy_${it.id}", false) }
+        game.totalClicks = prefs.getLong("clicks", game.patientsHealed)
+        game.clickEarned = prefs.getString("clickEarned", null)?.toDoubleOrNull() ?: 0.0
+        game.outbreaksCured = prefs.getInt("outbreaksCured", 0)
+        game.outbreaksFailed = prefs.getInt("outbreaksFailed", 0)
+        game.emergencies = prefs.getInt("emergencies", 0)
+        game.playTimeSec = prefs.getString("playTime", null)?.toDoubleOrNull() ?: 0.0
+        game.bestIncome = prefs.getString("bestIncome", null)?.toDoubleOrNull() ?: 0.0
+        game.startedAt = prefs.getLong("startedAt", System.currentTimeMillis())
+        game.buyAmount = prefs.getInt("buyAmount", 1).takeIf { it in BUY_AMOUNTS } ?: 1
+        game.curedEventIds += prefs.getStringSet("curedEvents", emptySet()).orEmpty()
+        game.visitedMaps += prefs.getStringSet("visitedMaps", emptySet()).orEmpty()
+        game.unlockedAchievements += prefs.getStringSet("achievements", emptySet()).orEmpty()
         val savedMap = prefs.getString("map", "village")
         game.mapId = game.maps.firstOrNull { it.id == savedMap && game.isMapUnlocked(it) }?.id ?: "village"
         game.tools.forEach { it.level = prefs.getInt("lvl_${it.id}", 0) }
@@ -861,5 +1019,7 @@ class MainActivity : Activity() {
     companion object {
         private const val PREFS = "hospital_clicker"
         private const val TICK_MS = 100L
+        private const val NEWS_TICKS = 120 // новая новость каждые ~12 секунд
+        private val BUY_AMOUNTS = listOf(1, 10, 100)
     }
 }

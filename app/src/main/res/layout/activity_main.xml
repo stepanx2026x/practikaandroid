@@ -127,25 +127,19 @@
         android:layout_weight="1"
         android:clipChildren="false">
 
-        <TextView
-            android:id="@+id/patientButton"
-            android:layout_width="180dp"
-            android:layout_height="180dp"
-            android:layout_gravity="center"
-            android:background="@drawable/bg_patient"
-            android:elevation="8dp"
-            android:gravity="center"
-            android:text="🤒"
-            android:textSize="88sp" />
+        <com.practika.hospitalclicker.HospitalView
+            android:id="@+id/hospitalView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
 
         <TextView
             android:id="@+id/patientsText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="8dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="10dp"
             android:textColor="@color/text_muted"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/emergencyButton"
@@ -165,6 +159,22 @@
             android:textStyle="bold"
             android:visibility="gone" />
     </FrameLayout>
+
+    <!-- Бегущая строка новостей -->
+    <TextView
+        android:id="@+id/newsText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/primary_dark"
+        android:ellipsize="marquee"
+        android:marqueeRepeatLimit="marquee_forever"
+        android:paddingStart="12dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="6dp"
+        android:singleLine="true"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp" />
 
     <!-- Вкладки магазина -->
     <HorizontalScrollView
@@ -198,6 +208,16 @@
                 android:id="@+id/tabMaps"
                 style="@style/Tab"
                 android:text="🗺️ Карты" />
+
+            <TextView
+                android:id="@+id/tabAchievements"
+                style="@style/Tab"
+                android:text="🏆 Достижения" />
+
+            <TextView
+                android:id="@+id/tabStats"
+                style="@style/Tab"
+                android:text="📊 Статистика" />
         </LinearLayout>
     </HorizontalScrollView>
 

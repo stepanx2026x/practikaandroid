@@ -17,6 +17,20 @@ class Tool(
 ) {
     /** Цена растёт на 15% с каждым купленным уровнем. */
     val cost: Double get() = floor(baseCost * 1.15.pow(level))
+
+    /** Цена покупки сразу [n] уровней. */
+    fun costFor(n: Int): Double = floor(baseCost * 1.15.pow(level) * bulkFactor(n))
+}
+
+/** Сумма геометрической прогрессии цен: 1 + 1.15 + 1.15² + … (n слагаемых). */
+fun bulkFactor(n: Int): Double {
+    var sum = 0.0
+    var term = 1.0
+    repeat(n) {
+        sum += term
+        term *= 1.15
+    }
+    return sum
 }
 
 /** Предмет для врача: покупается один раз и умножает доход этого врача. */
@@ -118,6 +132,14 @@ class EventType(
     val weight: Int = 10,
 )
 
+class Achievement(
+    val id: String,
+    val emoji: String,
+    val title: String,
+    val description: String,
+    val condition: (Game) -> Boolean,
+)
+
 class ActiveEvent(val type: EventType, var remaining: Double, var progress: Int = 0)
 
 class Game {
@@ -136,6 +158,23 @@ class Game {
     var mapId = "village"
     var event: ActiveEvent? = null
     var nextEventIn = 40.0
+
+    // --- Статистика ---
+    var totalClicks = 0L
+    var clickEarned = 0.0
+    var outbreaksCured = 0
+    var outbreaksFailed = 0
+    var emergencies = 0
+    var playTimeSec = 0.0
+    var bestIncome = 0.0
+    var startedAt = System.currentTimeMillis()
+    val curedEventIds = mutableSetOf<String>()
+    val visitedMaps = mutableSetOf("village")
+
+    /** Сколько покупать за раз: 1, 10 или 100. */
+    var buyAmount = 1
+
+    val unlockedAchievements = mutableSetOf<String>()
 
     /** Сообщения для игрока (начало/конец событий). */
     var onMessage: ((String) -> Unit)? = null
@@ -270,6 +309,57 @@ class Game {
         Legacy("fame", "🌟", "Мировая слава", "Каждая звезда даёт +3% вместо +2%", 25),
     )
 
+    val achievements: List<Achievement> = buildList {
+        fun a(id: String, emoji: String, title: String, desc: String, cond: (Game) -> Boolean) =
+            add(Achievement(id, emoji, title, desc, cond))
+
+        listOf(
+            1L to "Первый пациент", 100L to "Участковый", 1_000L to "Народный доктор",
+            10_000L to "Тысяча рук", 100_000L to "Спаситель района", 1_000_000L to "Миллион здоровых",
+        ).forEach { (n, t) -> a("patients_$n", "🤒", t, "Вылечить ${format(n.toDouble())} пациентов") { it.patientsHealed >= n } }
+
+        listOf(
+            1e3 to "Первая зарплата", 1e6 to "Миллионер в халате", 1e9 to "Медицинский магнат",
+            1e12 to "Триллион на здоровье", 1e15 to "Бюджет континента",
+        ).forEach { (n, t) -> a("earned_$n", "💰", t, "Заработать ${format(n)} ₽ за всё время") { it.lifetimeEarned >= n } }
+
+        listOf(
+            10.0 to "Своя практика", 1e3 to "Слаженная команда", 1e5 to "Конвейер здоровья",
+            1e7 to "Медицинская империя", 1e9 to "Здравоохранение планеты",
+        ).forEach { (n, t) -> a("income_$n", "📈", t, "Доход ${format(n)} ₽/сек") { it.incomePerSecond >= n } }
+
+        listOf(
+            10 to "Штат укомплектован", 100 to "Большой коллектив", 500 to "Целая армия в халатах",
+            1_000 to "Тысяча специалистов",
+        ).forEach { (n, t) -> a("staff_$n", "👨‍⚕️", t, "Нанять всего $n врачей") { g -> g.doctors.sumOf { it.count } >= n } }
+
+        a("all_types", "🧑‍🤝‍🧑", "Многопрофильная больница", "Нанять хотя бы одного врача каждой специальности") { g -> g.doctors.all { it.count > 0 } }
+        a("academic", "🎓", "Академик", "Поднять любого врача до квалификации «Академик»") { g -> g.doctors.any { !it.canUpgradeQualification } }
+        listOf(10 to "Хорошо оснащены", 30 to "Склад чудес", 60 to "Всё для всех").forEach { (n, t) ->
+            a("items_$n", "🧰", t, "Купить $n предметов для врачей") { g -> g.doctors.sumOf { d -> d.items.count { it.owned } } >= n }
+        }
+        listOf(1_000L to "Пальцы-молнии", 10_000L to "Неутомимый главврач", 100_000L to "Клик-легенда").forEach { (n, t) ->
+            a("clicks_$n", "👆", t, "Сделать ${format(n.toDouble())} кликов") { it.totalClicks >= n }
+        }
+        listOf(1 to "Первая победа", 10 to "Эпидемиолог", 50 to "Гроза вирусов").forEach { (n, t) ->
+            a("cured_$n", "🦠", t, "Остановить $n вспышек болезней") { it.outbreaksCured >= n }
+        }
+        a("cured_plague", "🐀", "Победитель чумы", "Остановить чуму") { "plague" in it.curedEventIds }
+        a("cured_mars", "👾", "Ксенобиолог", "Остановить марсианский вирус") { "marsvirus" in it.curedEventIds }
+        listOf(1 to "Скорая помощь", 25 to "Ангел на колёсах", 100 to "Король скорой").forEach { (n, t) ->
+            a("emergency_$n", "🚑", t, "Спасти $n экстренных пациентов") { it.emergencies >= n }
+        }
+        listOf(1 to "Аккредитован", 5 to "Пять звёзд", 20 to "Вечный главврач").forEach { (n, t) ->
+            a("prestige_$n", "⭐", t, "Пройти аккредитацию $n раз") { it.prestigeCount >= n }
+        }
+        listOf(10L to "Известная больница", 100L to "Звёздная клиника").forEach { (n, t) ->
+            a("stars_$n", "🌟", t, "Набрать $n звёзд репутации") { it.stars >= n }
+        }
+        a("mars", "🔴", "Марсианский доктор", "Перевезти больницу на Марс") { "mars" in it.visitedMaps }
+        a("traveler", "🗺️", "Путешественник", "Побывать на всех картах") { g -> g.maps.all { it.id in g.visitedMaps } }
+        a("hour", "⏰", "Ночная смена", "Провести в игре 1 час") { it.playTimeSec >= 3600 }
+    }
+
     val events = listOf(
         // Вспышки болезней
         EventType("flu", "🤧", "Эпидемия гриппа", "Доход снижен. Лечите пациентов, чтобы остановить грипп!",
@@ -331,22 +421,28 @@ class Game {
     private val eventClickMult: Double
         get() = event?.let { eventMult(it.type.clickMult, it.type.kind) } ?: 1.0
 
+    /** Каждое достижение даёт +1% к доходу и клику. */
+    val achievementBonus: Double get() = 1.0 + unlockedAchievements.size * 0.01
+
     val clickPower: Double
-        get() = (1.0 + tools.sumOf { it.power * it.level }) * starBonus * map.clickMult *
+        get() = (1.0 + tools.sumOf { it.power * it.level }) * starBonus * achievementBonus * map.clickMult *
             (if (hasLegacy("hands")) 2.0 else 1.0) * eventClickMult
 
     /** Пассивный доход без учёта текущего события. */
     val baseIncomePerSecond: Double
-        get() = doctors.sumOf { it.rawIncome } * starBonus * map.incomeMult
+        get() = doctors.sumOf { it.rawIncome } * globalIncomeMult
+
+    private val globalIncomeMult: Double get() = starBonus * achievementBonus * map.incomeMult
 
     val incomePerSecond: Double get() = baseIncomePerSecond * eventIncomeMult
 
     /** Полный множитель дохода врача (для отображения в карточке). */
-    fun doctorIncome(d: Doctor): Double = d.rawIncome * starBonus * map.incomeMult * eventIncomeMult
-    fun doctorIncomePerOne(d: Doctor): Double = d.rawIncomePerDoctor * starBonus * map.incomeMult * eventIncomeMult
+    fun doctorIncome(d: Doctor): Double = d.rawIncome * globalIncomeMult * eventIncomeMult
+    fun doctorIncomePerOne(d: Doctor): Double = d.rawIncomePerDoctor * globalIncomeMult * eventIncomeMult
 
-    fun hireCost(d: Doctor): Double =
-        floor(d.baseHireCost * map.hireCostMult * (if (hasLegacy("staff")) 0.85 else 1.0))
+    /** Цена найма [n] врачей сразу. */
+    fun hireCost(d: Doctor, n: Int = 1): Double =
+        floor(d.baseHireCost * bulkFactor(n) * map.hireCostMult * (if (hasLegacy("staff")) 0.85 else 1.0))
 
     val offlineLimitSec: Double get() = if (hasLegacy("night")) 12 * 3600.0 else 3 * 3600.0
 
@@ -410,6 +506,7 @@ class Game {
     fun selectMap(m: HospitalMap): Boolean {
         if (!isMapUnlocked(m)) return false
         mapId = m.id
+        visitedMaps += m.id
         // Болезнь другой местности не переезжает вместе с больницей
         event?.let { if (it.type.maps != null && m.id !in it.type.maps) event = null }
         return true
@@ -428,6 +525,8 @@ class Game {
         val amount = clickPower
         earn(amount)
         patientsHealed++
+        totalClicks++
+        clickEarned += amount
         val e = event
         if (e != null && e.type.kind == EventKind.OUTBREAK) {
             e.progress++
@@ -438,6 +537,8 @@ class Game {
 
     private fun cureOutbreak(e: ActiveEvent) {
         event = null
+        outbreaksCured++
+        curedEventIds += e.type.id
         val reward = maxOf(baseIncomePerSecond * e.type.rewardSeconds, clickPower * 50)
         earn(reward)
         scheduleNextEvent()
@@ -447,6 +548,9 @@ class Game {
     fun tick(seconds: Double) {
         if (seconds <= 0) return
         earn(incomePerSecond * seconds)
+        playTimeSec += seconds
+        if (incomePerSecond > bestIncome) bestIncome = incomePerSecond
+        checkAchievements()
 
         val e = event
         if (e != null) {
@@ -455,6 +559,7 @@ class Game {
                 event = null
                 scheduleNextEvent()
                 if (e.type.kind == EventKind.OUTBREAK) {
+                    outbreaksFailed++
                     val lossShare = if (hasLegacy("immunity")) 0.05 else 0.10
                     val loss = money * lossShare
                     money -= loss
@@ -503,15 +608,32 @@ class Game {
     /** Награда за экстренного пациента: 30 секунд дохода, но не меньше 20 кликов. */
     fun emergencyReward(): Double = maxOf(baseIncomePerSecond * 30, clickPower * 20)
 
+    fun rescueEmergency(): Double {
+        val reward = emergencyReward()
+        earn(reward)
+        patientsHealed++
+        emergencies++
+        return reward
+    }
+
+    fun checkAchievements() {
+        for (a in achievements) {
+            if (a.id !in unlockedAchievements && a.condition(this)) {
+                unlockedAchievements += a.id
+                onMessage?.invoke("🏆 Достижение: ${a.title}! (+1% к доходу и клику)")
+            }
+        }
+    }
+
     private fun pay(cost: Double): Boolean {
         if (money < cost) return false
         money -= cost
         return true
     }
 
-    fun buyTool(tool: Tool): Boolean = pay(tool.cost).also { if (it) tool.level++ }
+    fun buyTool(tool: Tool, n: Int = buyAmount): Boolean = pay(tool.costFor(n)).also { if (it) tool.level += n }
 
-    fun hire(doctor: Doctor): Boolean = pay(hireCost(doctor)).also { if (it) doctor.count++ }
+    fun hire(doctor: Doctor, n: Int = buyAmount): Boolean = pay(hireCost(doctor, n)).also { if (it) doctor.count += n }
 
     fun upgradeQualification(doctor: Doctor): Boolean {
         if (doctor.count == 0 || !doctor.canUpgradeQualification) return false
@@ -532,6 +654,18 @@ class Game {
         patientsHealed = 0
         mapId = "village"
         legacies.forEach { it.owned = false }
+        totalClicks = 0
+        clickEarned = 0.0
+        outbreaksCured = 0
+        outbreaksFailed = 0
+        emergencies = 0
+        playTimeSec = 0.0
+        bestIncome = 0.0
+        startedAt = System.currentTimeMillis()
+        curedEventIds.clear()
+        visitedMaps.clear()
+        visitedMaps += "village"
+        unlockedAchievements.clear()
         resetRun()
     }
 
