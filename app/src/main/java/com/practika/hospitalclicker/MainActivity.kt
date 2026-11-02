@@ -40,13 +40,13 @@ class MainActivity : Activity() {
     private lateinit var clickArea: FrameLayout
     private lateinit var upgradesContainer: LinearLayout
 
-    private class UpgradeRow(
-        val root: View,
-        val levelText: TextView,
-        val costText: TextView,
-    )
+    private lateinit var tabDoctors: TextView
+    private lateinit var tabTools: TextView
+    private lateinit var doctorsList: LinearLayout
+    private lateinit var toolsList: LinearLayout
 
-    private val rows = mutableMapOf<String, UpgradeRow>()
+    /** Функции, обновляющие карточки магазина при каждом тике. */
+    private val updaters = mutableListOf<() -> Unit>()
 
     private var lastTick = 0L
     private var lastRankIndex = 0
@@ -86,11 +86,14 @@ class MainActivity : Activity() {
         emergencyButton = findViewById(R.id.emergencyButton)
         clickArea = findViewById(R.id.clickArea)
         upgradesContainer = findViewById(R.id.upgradesContainer)
+        tabDoctors = findViewById(R.id.tabDoctors)
+        tabTools = findViewById(R.id.tabTools)
 
         load()
         lastRankIndex = game.rankIndex
 
-        buildUpgradeRows()
+        buildShop()
+        setupTabs()
         setupPatientButton()
 
         emergencyButton.setOnClickListener { onEmergencyClicked() }
@@ -212,91 +215,298 @@ class MainActivity : Activity() {
         refreshUi()
     }
 
-    // ---------- Улучшения ----------
+    // ---------- Магазин: врачи и инструменты ----------
 
-    private fun buildUpgradeRows() {
+    private fun setupTabs() {
+        tabDoctors.setOnClickListener { selectTab(doctorsTab = true) }
+        tabTools.setOnClickListener { selectTab(doctorsTab = false) }
+        selectTab(doctorsTab = true)
+    }
+
+    private fun selectTab(doctorsTab: Boolean) {
+        tabDoctors.setTextColor(getColor(if (doctorsTab) R.color.primary_dark else R.color.text_muted))
+        tabTools.setTextColor(getColor(if (doctorsTab) R.color.text_muted else R.color.primary_dark))
+        doctorsList.visibility = if (doctorsTab) View.VISIBLE else View.GONE
+        toolsList.visibility = if (doctorsTab) View.GONE else View.VISIBLE
+    }
+
+    private fun buildShop() {
         upgradesContainer.removeAllViews()
-        rows.clear()
-        for (upgrade in game.upgrades) {
-            val row = createUpgradeRow(upgrade)
-            upgradesContainer.addView(row.root)
-            rows[upgrade.id] = row
+        updaters.clear()
+        doctorsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        toolsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        game.doctors.forEachIndexed { i, d -> doctorsList.addView(createDoctorCard(i, d)) }
+        game.tools.forEach { toolsList.addView(createToolCard(it)) }
+        upgradesContainer.addView(doctorsList)
+        upgradesContainer.addView(toolsList)
+    }
+
+    private fun card(vertical: Boolean): LinearLayout = LinearLayout(this).apply {
+        orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundResource(R.drawable.bg_card)
+        elevation = dp(2).toFloat()
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(8) }
+    }
+
+    private fun text(size: Float, colorRes: Int, bold: Boolean = false) = TextView(this).apply {
+        textSize = size
+        setTextColor(getColor(colorRes))
+        if (bold) setTypeface(typeface, Typeface.BOLD)
+    }
+
+    private fun actionButton(): TextView = TextView(this).apply {
+        textSize = 13f
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        setTypeface(typeface, Typeface.BOLD)
+        setPadding(dp(10), dp(6), dp(10), dp(6))
+        minWidth = dp(96)
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { marginStart = dp(8) }
+    }
+
+    private fun setButtonState(button: TextView, enabled: Boolean) {
+        setBg(button, if (enabled) R.drawable.bg_button else R.drawable.bg_button_disabled)
+    }
+
+    /** Меняет фон, только если он действительно изменился (UI обновляется 10 раз в секунду). */
+    private fun setBg(view: View, res: Int) {
+        if (view.tag != res) {
+            view.setBackgroundResource(res)
+            view.tag = res
         }
     }
 
-    private fun createUpgradeRow(upgrade: Upgrade): UpgradeRow {
-        val root = LinearLayout(this).apply {
+    private fun pulse(view: View) {
+        view.animate().scaleX(0.95f).scaleY(0.95f).setDuration(70).withEndAction {
+            view.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+        }.start()
+    }
+
+    private fun afterPurchase(view: View) {
+        pulse(view)
+        save()
+        refreshUi()
+    }
+
+    private fun notEnough(cost: Double) {
+        Toast.makeText(this, "Не хватает ${Game.format(cost - game.money)} ₽", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun createDoctorCard(index: Int, doctor: Doctor): View {
+        val root = card(vertical = true)
+
+        // --- Найм ---
+        val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundResource(R.drawable.bg_card)
-            elevation = dp(2).toFloat()
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) }
-            isClickable = true
         }
-
         val emoji = TextView(this).apply {
-            text = upgrade.emoji
+            text = doctor.emoji
             textSize = 30f
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
         }
+        val info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(8) }
+        }
+        val title = text(16f, R.color.text, bold = true).apply { text = doctor.title }
+        val status = text(13f, R.color.primary_dark)
+        val income = text(12f, R.color.text_muted)
+        info.addView(title)
+        info.addView(status)
+        info.addView(income)
+        val hireButton = actionButton()
+        top.addView(emoji)
+        top.addView(info)
+        top.addView(hireButton)
+        root.addView(top)
 
+        // --- Квалификация ---
+        val qualRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        val qualText = text(13f, R.color.text).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val qualButton = actionButton()
+        qualRow.addView(qualText)
+        qualRow.addView(qualButton)
+        root.addView(qualRow)
+
+        // --- Предметы ---
+        root.addView(text(13f, R.color.text_muted, bold = true).apply {
+            text = "Предметы:"
+            setPadding(0, dp(8), 0, dp(4))
+        })
+        val itemsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(itemsRow)
+
+        val itemUpdaters = doctor.items.mapIndexed { i, item ->
+            val chip = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(4), dp(6), dp(4), dp(6))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                    .apply { if (i > 0) marginStart = dp(6) }
+            }
+            val itemEmoji = TextView(this).apply {
+                text = item.emoji
+                textSize = 24f
+                gravity = Gravity.CENTER
+            }
+            val itemName = text(11f, R.color.text).apply {
+                text = item.title
+                gravity = Gravity.CENTER
+                maxLines = 2
+            }
+            val itemEffect = text(12f, R.color.primary_dark, bold = true).apply {
+                text = "${Game.formatMultiplier(item.multiplier)} доход"
+                gravity = Gravity.CENTER
+            }
+            val itemState = text(11f, R.color.text_muted, bold = true).apply { gravity = Gravity.CENTER }
+            chip.addView(itemEmoji)
+            chip.addView(itemName)
+            chip.addView(itemEffect)
+            chip.addView(itemState)
+            itemsRow.addView(chip)
+
+            chip.setOnClickListener {
+                when {
+                    item.owned -> Toast.makeText(
+                        this, "${item.title}: уже куплено", Toast.LENGTH_SHORT,
+                    ).show()
+                    !doctor.isUnlocked(item) -> Toast.makeText(
+                        this,
+                        "Наймите ещё ${item.requiredCount - doctor.count} (${doctor.title}), чтобы открыть «${item.title}»",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    game.buyItem(doctor, item) -> {
+                        Toast.makeText(
+                            this, "${item.emoji} ${item.title}: доход «${doctor.title}» ${Game.formatMultiplier(item.multiplier)}!",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        afterPurchase(chip)
+                    }
+                    else -> notEnough(item.cost)
+                }
+            }
+
+            val updater: () -> Unit = {
+                val unlocked = doctor.isUnlocked(item)
+                when {
+                    item.owned -> {
+                        setBg(chip, R.drawable.bg_chip_owned)
+                        chip.alpha = 1f
+                        itemState.text = "✓ Есть"
+                        itemState.setTextColor(Color.parseColor("#2EAD5B"))
+                    }
+                    !unlocked -> {
+                        setBg(chip, R.drawable.bg_chip)
+                        chip.alpha = 0.55f
+                        itemState.text = "🔒 нужно ${item.requiredCount}"
+                        itemState.setTextColor(getColor(R.color.text_muted))
+                    }
+                    else -> {
+                        val affordable = game.money >= item.cost
+                        setBg(chip, if (affordable) R.drawable.bg_chip_ready else R.drawable.bg_chip)
+                        chip.alpha = 1f
+                        itemState.text = "${Game.format(item.cost)} ₽"
+                        itemState.setTextColor(getColor(if (affordable) R.color.primary else R.color.text_muted))
+                    }
+                }
+            }
+            updater
+        }
+
+        hireButton.setOnClickListener {
+            if (game.hire(doctor)) afterPurchase(hireButton) else notEnough(doctor.hireCost)
+        }
+        qualButton.setOnClickListener {
+            when {
+                doctor.count == 0 -> Toast.makeText(this, "Сначала наймите врача", Toast.LENGTH_SHORT).show()
+                !doctor.canUpgradeQualification -> Toast.makeText(this, "Максимальная квалификация", Toast.LENGTH_SHORT).show()
+                game.upgradeQualification(doctor) -> {
+                    Toast.makeText(this, "🎓 ${doctor.title}: теперь ${doctor.qualificationTitle}!", Toast.LENGTH_SHORT).show()
+                    afterPurchase(qualButton)
+                }
+                else -> notEnough(doctor.qualificationCost)
+            }
+        }
+
+        updaters += {
+            // Следующий врач появляется, когда нанят предыдущий
+            val visible = index == 0 || doctor.count > 0 || game.doctors[index - 1].count > 0
+            root.visibility = if (visible) View.VISIBLE else View.GONE
+            if (visible) {
+                status.text = "Нанято: ${doctor.count}  •  ${doctor.qualificationTitle}"
+                income.text = if (doctor.count > 0) {
+                    "+${Game.format(doctor.income)} ₽/сек (${Game.format(doctor.incomePerDoctor)} за каждого, ${Game.formatMultiplier(doctor.multiplier)})"
+                } else {
+                    "+${Game.format(doctor.incomePerDoctor)} ₽/сек за каждого"
+                }
+                hireButton.text = "Нанять\n${Game.format(doctor.hireCost)} ₽"
+                setButtonState(hireButton, game.money >= doctor.hireCost)
+
+                val next = doctor.nextQualificationTitle
+                if (next == null) {
+                    qualText.text = "🎓 ${doctor.qualificationTitle} — высшая квалификация"
+                    qualButton.text = "Макс."
+                    setButtonState(qualButton, false)
+                } else {
+                    qualText.text = "🎓 ${doctor.qualificationTitle} → $next (×2 доход)"
+                    qualButton.text = "Повысить\n${Game.format(doctor.qualificationCost)} ₽"
+                    setButtonState(qualButton, doctor.count > 0 && game.money >= doctor.qualificationCost)
+                }
+                itemUpdaters.forEach { it() }
+            }
+        }
+        return root
+    }
+
+    private fun createToolCard(tool: Tool): View {
+        val root = card(vertical = false)
+        val emoji = TextView(this).apply {
+            text = tool.emoji
+            textSize = 30f
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+        }
         val middle = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { marginStart = dp(8) }
         }
-        val title = TextView(this).apply {
-            text = upgrade.title
-            textSize = 16f
-            setTextColor(getColor(R.color.text))
-            setTypeface(typeface, Typeface.BOLD)
-        }
-        val desc = TextView(this).apply {
-            text = upgrade.description
-            textSize = 13f
-            setTextColor(getColor(R.color.text_muted))
-        }
-        val level = TextView(this).apply {
-            textSize = 12f
-            setTextColor(getColor(R.color.primary_dark))
-        }
-        middle.addView(title)
-        middle.addView(desc)
+        middle.addView(text(16f, R.color.text, bold = true).apply { text = tool.title })
+        middle.addView(text(13f, R.color.text_muted).apply { text = tool.description })
+        val level = text(12f, R.color.primary_dark)
         middle.addView(level)
-
-        val cost = TextView(this).apply {
-            textSize = 15f
-            setTypeface(typeface, Typeface.BOLD)
-            gravity = Gravity.END
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { marginStart = dp(8) }
-        }
+        val button = actionButton()
 
         root.addView(emoji)
         root.addView(middle)
-        root.addView(cost)
+        root.addView(button)
 
-        root.setOnClickListener {
-            if (game.buy(upgrade)) {
-                root.animate().scaleX(0.97f).scaleY(0.97f).setDuration(70).withEndAction {
-                    root.animate().scaleX(1f).scaleY(1f).setDuration(90).start()
-                }.start()
-                save()
-                refreshUi()
-            } else {
-                val need = upgrade.cost - game.money
-                Toast.makeText(this, "Не хватает ${Game.format(need)} ₽", Toast.LENGTH_SHORT).show()
-            }
+        button.setOnClickListener {
+            if (game.buyTool(tool)) afterPurchase(button) else notEnough(tool.cost)
         }
-
-        return UpgradeRow(root, level, cost)
+        updaters += {
+            level.text = "Уровень ${tool.level}"
+            button.text = "Купить\n${Game.format(tool.cost)} ₽"
+            setButtonState(button, game.money >= tool.cost)
+        }
+        return root
     }
 
     // ---------- Отрисовка ----------
@@ -316,14 +526,7 @@ class MainActivity : Activity() {
             Toast.makeText(this, "🎉 Новый статус: ${game.rank.title}!", Toast.LENGTH_LONG).show()
         }
 
-        for (upgrade in game.upgrades) {
-            val row = rows[upgrade.id] ?: continue
-            val affordable = game.money >= upgrade.cost
-            row.levelText.text = "Уровень ${upgrade.level}"
-            row.costText.text = "${Game.format(upgrade.cost)} ₽"
-            row.costText.setTextColor(getColor(if (affordable) R.color.primary else R.color.disabled))
-            row.root.alpha = if (affordable) 1f else 0.7f
-        }
+        updaters.forEach { it() }
     }
 
     // ---------- Сохранение ----------
@@ -334,7 +537,12 @@ class MainActivity : Activity() {
         prefs.putString("total", game.totalEarned.toString())
         prefs.putLong("patients", game.patientsHealed)
         prefs.putLong("savedAt", System.currentTimeMillis())
-        game.upgrades.forEach { prefs.putInt("lvl_${it.id}", it.level) }
+        game.tools.forEach { prefs.putInt("lvl_${it.id}", it.level) }
+        game.doctors.forEach { d ->
+            prefs.putInt("lvl_${d.id}", d.count)
+            prefs.putInt("qual_${d.id}", d.qualification)
+            d.items.forEach { prefs.putBoolean("item_${it.id}", it.owned) }
+        }
         prefs.apply()
     }
 
@@ -343,7 +551,13 @@ class MainActivity : Activity() {
         game.money = prefs.getString("money", null)?.toDoubleOrNull() ?: 0.0
         game.totalEarned = prefs.getString("total", null)?.toDoubleOrNull() ?: 0.0
         game.patientsHealed = prefs.getLong("patients", 0)
-        game.upgrades.forEach { it.level = prefs.getInt("lvl_${it.id}", 0) }
+        game.tools.forEach { it.level = prefs.getInt("lvl_${it.id}", 0) }
+        game.doctors.forEach { d ->
+            d.count = prefs.getInt("lvl_${d.id}", 0)
+            d.qualification = prefs.getInt("qual_${d.id}", 0)
+                .coerceIn(0, Doctor.QUALIFICATIONS.lastIndex)
+            d.items.forEach { it.owned = prefs.getBoolean("item_${it.id}", false) }
+        }
     }
 
     /** Доход, пока игра была свёрнута или закрыта (максимум за 3 часа). */
