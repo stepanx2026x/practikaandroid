@@ -58,6 +58,67 @@
             android:textSize="12sp" />
     </LinearLayout>
 
+    <!-- Баннер активного события (эпидемия или бонус) -->
+    <LinearLayout
+        android:id="@+id/eventBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/eventEmoji"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:textSize="30sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/eventTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/eventDesc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
+
+            <ProgressBar
+                android:id="@+id/eventProgress"
+                style="@android:style/Widget.Material.ProgressBar.Horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:layout_marginTop="4dp"
+                android:max="1000" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/eventTimer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textColor="@color/text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <!-- Зона клика -->
     <FrameLayout
         android:id="@+id/clickArea"
@@ -105,51 +166,40 @@
             android:visibility="gone" />
     </FrameLayout>
 
-    <!-- Магазин улучшений -->
-    <LinearLayout
+    <!-- Вкладки магазина -->
+    <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingEnd="8dp">
+        android:scrollbars="none">
 
-        <TextView
-            android:id="@+id/tabDoctors"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingTop="10dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="6dp"
-            android:text="👨‍⚕️ Врачи"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp">
 
-        <TextView
-            android:id="@+id/tabTools"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingTop="10dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="6dp"
-            android:text="🧰 Инструменты"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tabDoctors"
+                style="@style/Tab"
+                android:text="👨‍⚕️ Врачи" />
 
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+            <TextView
+                android:id="@+id/tabTools"
+                style="@style/Tab"
+                android:text="🧰 Клик" />
 
-        <TextView
-            android:id="@+id/resetButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="10dp"
-            android:text="Сброс"
-            android:textColor="@color/text_muted"
-            android:textSize="14sp" />
-    </LinearLayout>
+            <TextView
+                android:id="@+id/tabPrestige"
+                style="@style/Tab"
+                android:text="⭐ Престиж" />
+
+            <TextView
+                android:id="@+id/tabMaps"
+                style="@style/Tab"
+                android:text="🗺️ Карты" />
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <ScrollView
         android:layout_width="match_parent"

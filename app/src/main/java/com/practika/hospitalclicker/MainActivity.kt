@@ -40,10 +40,15 @@ class MainActivity : Activity() {
     private lateinit var clickArea: FrameLayout
     private lateinit var upgradesContainer: LinearLayout
 
-    private lateinit var tabDoctors: TextView
-    private lateinit var tabTools: TextView
-    private lateinit var doctorsList: LinearLayout
-    private lateinit var toolsList: LinearLayout
+    private lateinit var eventBanner: LinearLayout
+    private lateinit var eventEmoji: TextView
+    private lateinit var eventTitle: TextView
+    private lateinit var eventDesc: TextView
+    private lateinit var eventProgress: ProgressBar
+    private lateinit var eventTimer: TextView
+
+    private lateinit var tabs: List<TextView>
+    private lateinit var tabContents: List<LinearLayout>
 
     /** Функции, обновляющие карточки магазина при каждом тике. */
     private val updaters = mutableListOf<() -> Unit>()
@@ -86,8 +91,20 @@ class MainActivity : Activity() {
         emergencyButton = findViewById(R.id.emergencyButton)
         clickArea = findViewById(R.id.clickArea)
         upgradesContainer = findViewById(R.id.upgradesContainer)
-        tabDoctors = findViewById(R.id.tabDoctors)
-        tabTools = findViewById(R.id.tabTools)
+        eventBanner = findViewById(R.id.eventBanner)
+        eventEmoji = findViewById(R.id.eventEmoji)
+        eventTitle = findViewById(R.id.eventTitle)
+        eventDesc = findViewById(R.id.eventDesc)
+        eventProgress = findViewById(R.id.eventProgress)
+        eventTimer = findViewById(R.id.eventTimer)
+        tabs = listOf(
+            findViewById(R.id.tabDoctors),
+            findViewById(R.id.tabTools),
+            findViewById(R.id.tabPrestige),
+            findViewById(R.id.tabMaps),
+        )
+
+        game.onMessage = { msg -> Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
 
         load()
         lastRankIndex = game.rankIndex
@@ -97,7 +114,6 @@ class MainActivity : Activity() {
         setupPatientButton()
 
         emergencyButton.setOnClickListener { onEmergencyClicked() }
-        findViewById<View>(R.id.resetButton).setOnClickListener { confirmReset() }
 
         refreshUi()
     }
@@ -183,7 +199,7 @@ class MainActivity : Activity() {
     // ---------- Экстренный пациент ----------
 
     private fun scheduleNextEmergency() {
-        nextEmergencyAt = SystemClock.elapsedRealtime() + Random.nextLong(25_000, 60_000)
+        nextEmergencyAt = SystemClock.elapsedRealtime() + Random.nextLong(25_000, 60_000) / (if (game.hasLegacy("ambulance")) 2 else 1)
         emergencyHideAt = 0L
         emergencyButton.visibility = View.GONE
     }
@@ -218,28 +234,35 @@ class MainActivity : Activity() {
     // ---------- Магазин: врачи и инструменты ----------
 
     private fun setupTabs() {
-        tabDoctors.setOnClickListener { selectTab(doctorsTab = true) }
-        tabTools.setOnClickListener { selectTab(doctorsTab = false) }
-        selectTab(doctorsTab = true)
+        tabs.forEachIndexed { i, tab -> tab.setOnClickListener { selectTab(i) } }
+        selectTab(0)
     }
 
-    private fun selectTab(doctorsTab: Boolean) {
-        tabDoctors.setTextColor(getColor(if (doctorsTab) R.color.primary_dark else R.color.text_muted))
-        tabTools.setTextColor(getColor(if (doctorsTab) R.color.text_muted else R.color.primary_dark))
-        doctorsList.visibility = if (doctorsTab) View.VISIBLE else View.GONE
-        toolsList.visibility = if (doctorsTab) View.GONE else View.VISIBLE
+    private fun selectTab(index: Int) {
+        tabs.forEachIndexed { i, tab ->
+            tab.setTextColor(getColor(if (i == index) R.color.primary_dark else R.color.text_muted))
+        }
+        tabContents.forEachIndexed { i, content ->
+            content.visibility = if (i == index) View.VISIBLE else View.GONE
+        }
     }
 
     private fun buildShop() {
         upgradesContainer.removeAllViews()
         updaters.clear()
-        doctorsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        toolsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val doctorsList = vertical()
+        val toolsList = vertical()
+        val prestigeList = vertical()
+        val mapsList = vertical()
         game.doctors.forEachIndexed { i, d -> doctorsList.addView(createDoctorCard(i, d)) }
         game.tools.forEach { toolsList.addView(createToolCard(it)) }
-        upgradesContainer.addView(doctorsList)
-        upgradesContainer.addView(toolsList)
+        buildPrestigeTab(prestigeList)
+        game.maps.forEach { mapsList.addView(createMapCard(it)) }
+        tabContents = listOf(doctorsList, toolsList, prestigeList, mapsList)
+        tabContents.forEach { upgradesContainer.addView(it) }
     }
+
+    private fun vertical() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
     private fun card(vertical: Boolean): LinearLayout = LinearLayout(this).apply {
         orientation = if (vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
@@ -431,7 +454,7 @@ class MainActivity : Activity() {
         }
 
         hireButton.setOnClickListener {
-            if (game.hire(doctor)) afterPurchase(hireButton) else notEnough(doctor.hireCost)
+            if (game.hire(doctor)) afterPurchase(hireButton) else notEnough(game.hireCost(doctor))
         }
         qualButton.setOnClickListener {
             when {
@@ -452,12 +475,13 @@ class MainActivity : Activity() {
             if (visible) {
                 status.text = "Нанято: ${doctor.count}  •  ${doctor.qualificationTitle}"
                 income.text = if (doctor.count > 0) {
-                    "+${Game.format(doctor.income)} ₽/сек (${Game.format(doctor.incomePerDoctor)} за каждого, ${Game.formatMultiplier(doctor.multiplier)})"
+                    "+${Game.format(game.doctorIncome(doctor))} ₽/сек (${Game.format(game.doctorIncomePerOne(doctor))} за каждого, ${Game.formatMultiplier(doctor.multiplier)})"
                 } else {
-                    "+${Game.format(doctor.incomePerDoctor)} ₽/сек за каждого"
+                    "+${Game.format(game.doctorIncomePerOne(doctor))} ₽/сек за каждого"
                 }
-                hireButton.text = "Нанять\n${Game.format(doctor.hireCost)} ₽"
-                setButtonState(hireButton, game.money >= doctor.hireCost)
+                val hireCost = game.hireCost(doctor)
+                hireButton.text = "Нанять\n${Game.format(hireCost)} ₽"
+                setButtonState(hireButton, game.money >= hireCost)
 
                 val next = doctor.nextQualificationTitle
                 if (next == null) {
@@ -509,12 +533,212 @@ class MainActivity : Activity() {
         return root
     }
 
+    // ---------- Престиж ----------
+
+    private fun buildPrestigeTab(list: LinearLayout) {
+        // Карточка аккредитации
+        val main = card(vertical = true)
+        main.addView(text(17f, R.color.text, bold = true).apply { text = "⭐ Аккредитация больницы" })
+        main.addView(text(13f, R.color.text_muted).apply {
+            text = "Пройдите аккредитацию, чтобы получить звёзды репутации. Больница, врачи и " +
+                "инструменты сбросятся, но звёзды навсегда увеличат весь доход и клик, а за " +
+                "свободные звёзды можно купить улучшения наследия и открыть новые карты."
+            setPadding(0, dp(4), 0, dp(8))
+        })
+        val starsInfo = text(14f, R.color.text, bold = true)
+        val pendingInfo = text(13f, R.color.primary_dark)
+        val statsInfo = text(12f, R.color.text_muted).apply { setPadding(0, dp(4), 0, 0) }
+        val prestigeButton = actionButton().apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10) }
+            setPadding(dp(10), dp(12), dp(10), dp(12))
+            textSize = 15f
+        }
+        main.addView(starsInfo)
+        main.addView(pendingInfo)
+        main.addView(statsInfo)
+        main.addView(prestigeButton)
+        list.addView(main)
+
+        prestigeButton.setOnClickListener {
+            if (!game.canPrestige()) {
+                Toast.makeText(
+                    this,
+                    "Заработайте за забег хотя бы ${Game.format(Game.PRESTIGE_UNIT)} ₽",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return@setOnClickListener
+            }
+            val gain = game.pendingStars
+            AlertDialog.Builder(this)
+                .setTitle("Пройти аккредитацию?")
+                .setMessage(
+                    "Вы получите ⭐ $gain.\n\nДеньги, врачи, предметы и инструменты будут сброшены. " +
+                        "Звёзды, наследие и открытые карты сохранятся.",
+                )
+                .setPositiveButton("Пройти") { _, _ ->
+                    val gained = game.prestige()
+                    lastRankIndex = 0
+                    save()
+                    refreshUi()
+                    AlertDialog.Builder(this)
+                        .setTitle("🎉 Аккредитация пройдена!")
+                        .setMessage(
+                            "Получено ⭐ $gained. Теперь у вас ⭐ ${game.stars}: " +
+                                "доход и клик ${Game.formatMultiplier(game.starBonus)}.",
+                        )
+                        .setPositiveButton("Ура", null)
+                        .show()
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
+
+        updaters += {
+            starsInfo.text = "Звёзды репутации: ⭐ ${game.stars} (свободно: ${game.availableStars})\n" +
+                "Бонус ко всему доходу: ${Game.formatMultiplier(game.starBonus)}"
+            val pending = game.pendingStars
+            pendingInfo.text = "За этот забег: +⭐ $pending  •  следующая звезда при " +
+                "${Game.format(game.nextStarAt)} ₽ заработано (сейчас ${Game.format(game.totalEarned)} ₽)"
+            statsInfo.text = "Аккредитаций: ${game.prestigeCount}  •  Заработано за всё время: " +
+                "${Game.format(game.lifetimeEarned)} ₽  •  Вылечено: ${game.patientsHealed}"
+            prestigeButton.text = if (pending > 0) "Пройти аккредитацию (+⭐ $pending)" else "Аккредитация пока недоступна"
+            setButtonState(prestigeButton, pending > 0)
+        }
+
+        list.addView(text(16f, R.color.text, bold = true).apply {
+            text = "Наследие (за свободные звёзды)"
+            setPadding(dp(4), dp(14), 0, 0)
+        })
+        game.legacies.forEach { list.addView(createLegacyCard(it)) }
+
+        // Полный сброс
+        list.addView(TextView(this).apply {
+            text = "Полный сброс игры"
+            textSize = 13f
+            setTextColor(getColor(R.color.text_muted))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, dp(8))
+            setOnClickListener { confirmReset() }
+        })
+    }
+
+    private fun createLegacyCard(legacy: Legacy): View {
+        val root = card(vertical = false)
+        root.addView(TextView(this).apply {
+            text = legacy.emoji
+            textSize = 28f
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+        })
+        val middle = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(8) }
+        }
+        middle.addView(text(15f, R.color.text, bold = true).apply { text = legacy.title })
+        middle.addView(text(13f, R.color.text_muted).apply { text = legacy.description })
+        root.addView(middle)
+        val button = actionButton()
+        root.addView(button)
+
+        button.setOnClickListener {
+            when {
+                legacy.owned -> Unit
+                game.buyLegacy(legacy) -> {
+                    Toast.makeText(this, "${legacy.emoji} ${legacy.title} — навсегда ваше!", Toast.LENGTH_SHORT).show()
+                    afterPurchase(button)
+                }
+                else -> Toast.makeText(
+                    this, "Нужно ⭐ ${legacy.cost}, свободно ⭐ ${game.availableStars}", Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+        updaters += {
+            if (legacy.owned) {
+                button.text = "✓ Есть"
+                setBg(button, R.drawable.bg_chip_owned)
+                button.setTextColor(Color.parseColor("#2EAD5B"))
+            } else {
+                button.text = "Купить\n⭐ ${legacy.cost}"
+                button.setTextColor(Color.WHITE)
+                setButtonState(button, game.availableStars >= legacy.cost)
+            }
+        }
+        return root
+    }
+
+    // ---------- Карты ----------
+
+    private fun createMapCard(m: HospitalMap): View {
+        val root = card(vertical = false)
+        root.addView(TextView(this).apply {
+            text = m.emoji
+            textSize = 30f
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52))
+        })
+        val middle = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(8) }
+        }
+        middle.addView(text(16f, R.color.text, bold = true).apply { text = m.title })
+        middle.addView(text(13f, R.color.text_muted).apply { text = m.description })
+        val diseases = game.events
+            .filter { it.kind == EventKind.OUTBREAK && (it.maps == null || m.id in it.maps) }
+            .joinToString(" ") { it.emoji }
+        middle.addView(text(12f, R.color.text_muted).apply { text = "Болезни: $diseases" })
+        root.addView(middle)
+        val button = actionButton()
+        root.addView(button)
+
+        button.setOnClickListener {
+            when {
+                game.mapId == m.id -> Unit
+                !game.isMapUnlocked(m) -> Toast.makeText(
+                    this,
+                    "Откроется, когда у вас будет ⭐ ${m.starsRequired} (сейчас ⭐ ${game.stars})",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                game.selectMap(m) -> {
+                    Toast.makeText(this, "${m.emoji} Больница переехала: ${m.title}", Toast.LENGTH_SHORT).show()
+                    afterPurchase(root)
+                }
+            }
+        }
+        updaters += {
+            val unlocked = game.isMapUnlocked(m)
+            root.alpha = if (unlocked) 1f else 0.6f
+            when {
+                game.mapId == m.id -> {
+                    button.text = "✓ Здесь"
+                    setBg(button, R.drawable.bg_chip_owned)
+                    button.setTextColor(Color.parseColor("#2EAD5B"))
+                }
+                unlocked -> {
+                    button.text = "Переехать"
+                    button.setTextColor(Color.WHITE)
+                    setButtonState(button, true)
+                }
+                else -> {
+                    button.text = "🔒 ⭐ ${m.starsRequired}"
+                    button.setTextColor(Color.WHITE)
+                    setButtonState(button, false)
+                }
+            }
+        }
+        return root
+    }
+
     // ---------- Отрисовка ----------
 
     private fun refreshUi() {
         moneyText.text = "${Game.format(game.money)} ₽"
         incomeText.text = "${Game.format(game.incomePerSecond)} ₽/сек  •  ${Game.format(game.clickPower)} ₽ за клик"
-        rankText.text = "🏥 ${game.rank.title}"
+        rankText.text = "${game.map.emoji} ${game.rank.title}" +
+            (if (game.stars > 0) "  •  ⭐ ${game.stars} (+${Game.format((game.starBonus - 1) * 100)}%)" else "")
         rankProgress.progress = (game.rankProgress * rankProgress.max).toInt()
         nextRankText.text = game.nextRank?.let {
             "Следующий статус: ${it.title} (${Game.format(it.threshold)} ₽ заработано)"
@@ -526,7 +750,36 @@ class MainActivity : Activity() {
             Toast.makeText(this, "🎉 Новый статус: ${game.rank.title}!", Toast.LENGTH_LONG).show()
         }
 
+        updateEventBanner()
+        val bg = Color.parseColor(game.map.background)
+        if (clickArea.tag != bg) {
+            clickArea.setBackgroundColor(bg)
+            clickArea.tag = bg
+        }
         updaters.forEach { it() }
+    }
+
+    private fun updateEventBanner() {
+        val e = game.event
+        if (e == null) {
+            eventBanner.visibility = View.GONE
+            return
+        }
+        eventBanner.visibility = View.VISIBLE
+        val outbreak = e.type.kind == EventKind.OUTBREAK
+        setBg(eventBanner, if (outbreak) R.drawable.bg_event_bad else R.drawable.bg_event_good)
+        eventEmoji.text = e.type.emoji
+        eventTitle.text = e.type.title
+        eventTimer.text = "${e.remaining.toInt() + 1} с"
+        if (outbreak) {
+            eventDesc.text = "Вылечено ${e.progress} из ${e.type.cureClicks} — жмите на пациента!"
+            eventProgress.progress = (e.progress * 1000 / e.type.cureClicks)
+            eventProgress.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#E53950"))
+        } else {
+            eventDesc.text = e.type.description
+            eventProgress.progress = (e.remaining / e.type.durationSec * 1000).toInt().coerceIn(0, 1000)
+            eventProgress.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#2EAD5B"))
+        }
     }
 
     // ---------- Сохранение ----------
@@ -536,6 +789,12 @@ class MainActivity : Activity() {
         prefs.putString("money", game.money.toString())
         prefs.putString("total", game.totalEarned.toString())
         prefs.putLong("patients", game.patientsHealed)
+        prefs.putString("lifetime", game.lifetimeEarned.toString())
+        prefs.putLong("stars", game.stars)
+        prefs.putLong("starsSpent", game.starsSpent)
+        prefs.putInt("prestiges", game.prestigeCount)
+        prefs.putString("map", game.mapId)
+        game.legacies.forEach { prefs.putBoolean("legacy_${it.id}", it.owned) }
         prefs.putLong("savedAt", System.currentTimeMillis())
         game.tools.forEach { prefs.putInt("lvl_${it.id}", it.level) }
         game.doctors.forEach { d ->
@@ -551,6 +810,13 @@ class MainActivity : Activity() {
         game.money = prefs.getString("money", null)?.toDoubleOrNull() ?: 0.0
         game.totalEarned = prefs.getString("total", null)?.toDoubleOrNull() ?: 0.0
         game.patientsHealed = prefs.getLong("patients", 0)
+        game.lifetimeEarned = prefs.getString("lifetime", null)?.toDoubleOrNull() ?: game.totalEarned
+        game.stars = prefs.getLong("stars", 0)
+        game.starsSpent = prefs.getLong("starsSpent", 0)
+        game.prestigeCount = prefs.getInt("prestiges", 0)
+        game.legacies.forEach { it.owned = prefs.getBoolean("legacy_${it.id}", false) }
+        val savedMap = prefs.getString("map", "village")
+        game.mapId = game.maps.firstOrNull { it.id == savedMap && game.isMapUnlocked(it) }?.id ?: "village"
         game.tools.forEach { it.level = prefs.getInt("lvl_${it.id}", 0) }
         game.doctors.forEach { d ->
             d.count = prefs.getInt("lvl_${d.id}", 0)
@@ -563,11 +829,11 @@ class MainActivity : Activity() {
     /** Доход, пока игра была свёрнута или закрыта (максимум за 3 часа). */
     private fun applyOfflineEarnings() {
         val savedAt = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("savedAt", 0)
-        if (savedAt <= 0 || game.incomePerSecond <= 0) return
+        if (savedAt <= 0 || game.baseIncomePerSecond <= 0) return
         val seconds = ((System.currentTimeMillis() - savedAt) / 1000.0)
-            .coerceIn(0.0, OFFLINE_LIMIT_SEC)
+            .coerceIn(0.0, game.offlineLimitSec)
         if (seconds < 10) return
-        val earned = game.incomePerSecond * seconds
+        val earned = game.baseIncomePerSecond * seconds
         game.earn(earned)
         AlertDialog.Builder(this)
             .setTitle("С возвращением, главврач!")
@@ -579,7 +845,7 @@ class MainActivity : Activity() {
     private fun confirmReset() {
         AlertDialog.Builder(this)
             .setTitle("Начать заново?")
-            .setMessage("Весь прогресс больницы будет удалён.")
+            .setMessage("Весь прогресс будет удалён, включая звёзды репутации, наследие и карты.")
             .setPositiveButton("Сбросить") { _, _ ->
                 game.reset()
                 lastRankIndex = 0
@@ -595,6 +861,5 @@ class MainActivity : Activity() {
     companion object {
         private const val PREFS = "hospital_clicker"
         private const val TICK_MS = 100L
-        private const val OFFLINE_LIMIT_SEC = 3 * 60 * 60.0
     }
 }
