@@ -1,6 +1,3 @@
-.gradle/
-build/
-.idea/
-*.iml
-out/
-.DS_Store
+/target
+*.png
+!assets/**/*.png
